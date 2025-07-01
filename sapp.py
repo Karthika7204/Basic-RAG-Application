@@ -1,9 +1,10 @@
 import streamlit as st
+import os
 from PyPDF2 import PdfReader
 from PIL import Image
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-import os
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from faster_whisper import WhisperModel
 import google.generativeai as genai
 from langchain.vectorstores import FAISS
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -11,10 +12,12 @@ from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 
+
 #api configuration
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=api_key)
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 #Read multiple pdf using PyPDF2 reader and extract the text
 def get_pdf_text(pdf_docs):
@@ -24,12 +27,6 @@ def get_pdf_text(pdf_docs):
         for page in pdf_reader.pages:
             text += page.extract_text()
     return text
-
-#Convert the raw text data into managable chunks using RecursiveCharacterTextSplitter
-def get_text_chunks(text):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
-    chunks = text_splitter.split_text(text)
-    return chunks
 
 #Captioning the image using gemini-modal-1.5-flash 
 def get_image_summaries(image_files):
@@ -45,6 +42,40 @@ def get_image_summaries(image_files):
         summaries.append(response.text)
 
     return summaries
+
+import os
+
+def get_audio_text(audio_files):
+    model = WhisperModel("tiny", device="cpu")
+    combined_text = ""
+
+    # Make sure the folder exists
+    audio_folder = "audio_uploads"
+    os.makedirs(audio_folder, exist_ok=True)
+
+    for audio_file in audio_files:
+        file_path = os.path.join(audio_folder, audio_file.name)
+
+        # Save the file to the folder
+        with open(file_path, "wb") as f:
+            f.write(audio_file.read())
+
+        # Transcribe the saved file
+        segments, _ = model.transcribe(file_path)
+        audio_text = " ".join([segment.text for segment in segments])
+        combined_text += audio_text + "\n"
+
+        # Optionally delete after use:
+        os.remove(file_path)
+
+    return combined_text
+
+
+#Convert the raw text data into managable chunks using RecursiveCharacterTextSplitter
+def get_text_chunks(text):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
+    chunks = text_splitter.split_text(text)
+    return chunks
 
 #Converts chunks to vector embeddings using Gemini embeddings and Store it in the FAISS db
 def get_vector_store(text_chunks):
@@ -94,21 +125,25 @@ def main():
         st.title("Upload Documents")
         pdf_docs = st.file_uploader("Upload PDF Files", type=["pdf"], accept_multiple_files=True)
         image_files = st.file_uploader("Upload Image Files", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+        audio_files = st.file_uploader("Upload Audio Files", type=["mp3"], accept_multiple_files=True)
 
         if st.button("Submit & Process"):
             with st.spinner("Processing..."):
 
-                # Process PDF text
+                #Process PDF text
                 raw_text = get_pdf_text(pdf_docs) if pdf_docs else ""
 
-                # Process image text
+                #Process image text
                 image_summaries = get_image_summaries(image_files) if image_files else []
 
-                # Combine all text and image content
-                full_text = raw_text + "\n".join(image_summaries)
+                #Process audio text
+                audio_text = get_audio_text(audio_files) if audio_files else ""
+
+                #Combine all text and image content
+                full_text = raw_text + "\n".join(image_summaries) + "\n".join(audio_text)
                 text_chunks = get_text_chunks(full_text)
 
-                # Store in FAISS
+                #Store in FAISS
                 get_vector_store(text_chunks)
                 st.success("Documents indexed successfully!")
 
