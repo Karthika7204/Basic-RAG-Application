@@ -11,10 +11,12 @@ from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 
+#api configuration
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=api_key)
 
+#Read multiple pdf using PyPDF2 reader and extract the text
 def get_pdf_text(pdf_docs):
     text = ""
     for pdf in pdf_docs:
@@ -23,25 +25,34 @@ def get_pdf_text(pdf_docs):
             text += page.extract_text()
     return text
 
+#Convert the raw text data into managable chunks using RecursiveCharacterTextSplitter
 def get_text_chunks(text):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
     chunks = text_splitter.split_text(text)
     return chunks
 
-def get_image_summary(image_file):
-    image = Image.open(image_file)
+#Captioning the image using gemini-modal-1.5-flash 
+def get_image_summaries(image_files):
     model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content([
-        image,
-        "Describe the contents of this image. Focus on any text, tables, or visual elements that can be used for question answering."
-    ])
-    return response.text
+    summaries = []
 
+    for image_file in image_files:
+        image = Image.open(image_file)
+        response = model.generate_content([
+            image,
+            "Describe the contents of this image. Focus on any text, tables, or visual elements that can be used for question answering."
+        ])
+        summaries.append(response.text)
+
+    return summaries
+
+#Converts chunks to vector embeddings using Gemini embeddings and Store it in the FAISS db
 def get_vector_store(text_chunks):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
     vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
     vector_store.save_local("faiss_index")
 
+#Creates a QA chain using a Gemini chat model and a custom prompt.
 def get_conversational_chain():
     prompt_template = """
     Answer the question as detailed as possible from the provided context. If the answer is not in
@@ -60,6 +71,7 @@ def get_conversational_chain():
     chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
     return chain
 
+#Processing the user query and retrive the related context
 def user_input(user_question):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
     new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
@@ -68,6 +80,7 @@ def user_input(user_question):
     response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
     st.write("Reply:", response["output_text"])
 
+#Sets up the Streamlit UI.
 def main():
     st.set_page_config(page_title="Chat PDF + Image RAG")
     st.header("Multimodal RAG: PDF and Image Q&A", divider='rainbow')
@@ -89,11 +102,7 @@ def main():
                 raw_text = get_pdf_text(pdf_docs) if pdf_docs else ""
 
                 # Process image text
-                image_summaries = []
-                if image_files:
-                    for image_file in image_files:
-                        summary = get_image_summary(image_file)
-                        image_summaries.append(summary)
+                image_summaries = get_image_summaries(image_files) if image_files else []
 
                 # Combine all text and image content
                 full_text = raw_text + "\n".join(image_summaries)
