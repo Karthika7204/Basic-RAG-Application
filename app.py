@@ -82,7 +82,7 @@ def user_input(user_question):
 
 #Sets up the Streamlit UI.
 def main():
-    st.set_page_config(page_title="Chat PDF + Image RAG")
+    st.set_page_config(page_title="Multimodal Rag")
     st.header("Multimodal RAG: PDF and Image Q&A", divider='rainbow')
 
     user_question = st.text_input("Ask a Question from PDF/Image Documents")
