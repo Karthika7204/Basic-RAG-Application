@@ -88,39 +88,25 @@ def process_inputs(pdf_files, image_files):
     get_vector_store(chunks)
     return "✅ Documents processed and indexed!"
 
-with gr.Blocks(title="Multimodal RAG - Gemini Q&A", css="footer {display: none;}") as demo:
-    gr.Markdown("""
-        <div style="text-align: center; padding: 1rem;">
-            <h1 style="color: #4F46E5;">📚 Multimodal RAG Q&A 🤖</h1>
-            <p style="font-size: 16px;">
-                Upload <strong>PDFs</strong> and <strong>Images</strong>, then ask any question about them.<br>
-                Powered by <span style="color:#10b981;"><strong>Gemini + FAISS</strong></span> for smart document understanding.
-            </p>
-        </div>
-    """)
+# Gradio UI
+with gr.Blocks(title="Multimodal RAG (PDF + Image)") as demo:
+    gr.Markdown("# 🤖 Multimodal RAG: PDF + Image Q&A using Gemini")
+    gr.Markdown("Upload PDFs and images. Ask questions based on them!")
 
-    with gr.Group():
-        gr.Markdown("### 📤 Upload your Documents")
-        with gr.Row():
-            pdf_input = gr.File(label="📎 Upload PDF files", file_types=[".pdf"], file_count="multiple")
-            img_input = gr.File(label="🖼️ Upload Image files", file_types=[".png", ".jpg", ".jpeg"], file_count="multiple")
-        
-        process_button = gr.Button("🚀 Submit & Process", variant="primary", size="lg")
-        process_output = gr.Textbox(label="📢 Status", placeholder="Waiting for input...", interactive=False)
+    with gr.Row():
+        pdf_input = gr.File(label="Upload PDFs", file_types=[".pdf"], file_count="multiple")
+        img_input = gr.File(label="Upload Images", file_types=[".jpg", ".jpeg", ".png"], file_count="multiple")
+        process_button = gr.Button("Submit & Process")
 
-    gr.Markdown("---")
+    process_output = gr.Textbox(label="Processing Status", interactive=False)
 
-    with gr.Group():
-        gr.Markdown("### 💬 Ask a Question")
-        with gr.Row():
-            question_input = gr.Textbox(label="Your Question", placeholder="e.g. What is the budget mentioned in the document?")
-        
-        answer_output = gr.Textbox(label="🔍 Answer", placeholder="Answer will appear here...", lines=6)
+    with gr.Row():
+        question_input = gr.Textbox(label="Ask a Question", placeholder="Type your question here...")
+        answer_output = gr.Textbox(label="Answer", lines=5)
 
     process_button.click(fn=process_inputs, inputs=[pdf_input, img_input], outputs=process_output)
     question_input.submit(fn=generate_answer, inputs=question_input, outputs=answer_output)
 
-# Run app
+# Launch app
 if __name__ == "__main__":
     demo.launch()
-
