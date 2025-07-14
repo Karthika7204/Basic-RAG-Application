@@ -8,3 +8,5 @@ faiss-cpu
 langchain_google_genai
 gradio
 whisper
+faster_whisper
+langchain_community
