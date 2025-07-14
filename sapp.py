@@ -1,5 +1,8 @@
+import pandas as pd
 import streamlit as st
 import os
+import fitz  
+import io
 from PyPDF2 import PdfReader
 from PIL import Image
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -11,6 +14,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
+from langchain.docstore.document import Document
 
 
 #api configuration
@@ -28,13 +32,43 @@ def get_pdf_text(pdf_docs):
             text += page.extract_text()
     return text
 
+def extract_images_from_pdfs(pdf_docs):
+    images = []
+
+    for pdf_file in pdf_docs:
+        try:
+            file_bytes = pdf_file.read()
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+
+            for page_index in range(len(doc)):
+                try:
+                    page = doc.load_page(page_index)  # safer than doc[page_index]
+                    image_list = page.get_images(full=True)
+
+                    for img_index, img in enumerate(image_list):
+                        xref = img[0]
+                        base_image = doc.extract_image(xref)
+                        image_bytes = base_image["image"]
+                        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+                        images.append(image)
+
+                except Exception as e:
+                    print(f"Skipping corrupted page {page_index}: {e}")
+                    continue
+
+        except Exception as e:
+            print(f"Skipping invalid PDF: {e}")
+            continue
+
+    return images
+
+
 #Captioning the image using gemini-modal-1.5-flash 
-def get_image_summaries(image_files):
+def get_image_summaries(image_objects):
     model = genai.GenerativeModel("gemini-1.5-flash")
     summaries = []
 
-    for image_file in image_files:
-        image = Image.open(image_file)
+    for image in image_objects:
         response = model.generate_content([
             image,
             "Describe the contents of this image. Focus on any text, tables, or visual elements that can be used for question answering."
@@ -43,7 +77,6 @@ def get_image_summaries(image_files):
 
     return summaries
 
-import os
 
 def get_audio_text(audio_files):
     model = WhisperModel("tiny", device="cpu")
@@ -78,16 +111,17 @@ def get_text_chunks(text):
     return chunks
 
 #Converts chunks to vector embeddings using Gemini embeddings and Store it in the FAISS db
-def get_vector_store(text_chunks):
+def get_vector_store(chunks, source_type):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
+    docs = [Document(page_content=chunk, metadata={"source": source_type}) for chunk in chunks]
+    vector_store = FAISS.from_documents(docs, embedding=embeddings)
     vector_store.save_local("faiss_index")
 
 #Creates a QA chain using a Gemini chat model and a custom prompt.
 def get_conversational_chain():
     prompt_template = """
-    Answer the question as detailed as possible from the provided context. If the answer is not in
-    the provided context, just say "Answer is not available in the context." Don't make up an answer.
+    You will be given some context and possibly multiple questions. Answer each question as detailly,clearly and separately as possible based on the context. 
+    If an answer is not available, say "Not available in the context."
 
     Context:
     {context}
@@ -114,7 +148,7 @@ def user_input(user_question):
 #Sets up the Streamlit UI.
 def main():
     st.set_page_config(page_title="Multimodal Rag")
-    st.header("Multimodal RAG: PDF and Image Q&A", divider='rainbow')
+    st.header("Multimodal RAG: PDF,Image and Audio Q&A", divider='rainbow')
 
     user_question = st.text_input("Ask a Question from PDF/Image Documents")
 
@@ -134,17 +168,23 @@ def main():
                 raw_text = get_pdf_text(pdf_docs) if pdf_docs else ""
 
                 #Process image text
-                image_summaries = get_image_summaries(image_files) if image_files else []
+                uploaded_images = [Image.open(img) for img in image_files] if image_files else []
+                pdf_extracted_images = extract_images_from_pdfs(pdf_docs) if pdf_docs else []
+                all_images = uploaded_images + pdf_extracted_images
+
+                # Caption all images together
+                image_summaries = get_image_summaries(all_images) if all_images else []
+
 
                 #Process audio text
                 audio_text = get_audio_text(audio_files) if audio_files else ""
 
                 #Combine all text and image content
-                full_text = raw_text + "\n".join(image_summaries) + "\n".join(audio_text)
+                full_text = raw_text + "\n".join(image_summaries) + audio_text
                 text_chunks = get_text_chunks(full_text)
 
                 #Store in FAISS
-                get_vector_store(text_chunks)
+                get_vector_store(text_chunks, source_type="multimodal")
                 st.success("Documents indexed successfully!")
 
 if __name__ == "__main__":
